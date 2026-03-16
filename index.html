@@ -334,6 +334,18 @@ tr.selected td{background:var(--glow)}
 .delete-btn:hover{background:rgba(192,28,40,.28)}
 .select-checkbox{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
 
+.move-btn{
+  background:var(--bg4);color:var(--text3);border:1px solid var(--border);border-radius:4px;
+  width:20px;height:20px;cursor:pointer;font-size:11px;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:var(--trans);padding:0;line-height:1;
+}
+.move-btn:hover:not(:disabled){background:var(--accent);color:#fff;border-color:var(--accent)}
+.move-btn:disabled{opacity:.25;cursor:not-allowed}
+.move-cell{display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 0}
+tr:focus-within td,.table-focused td{outline:none}
+tr.kb-focus td{background:rgba(53,132,228,0.15)!important;outline:none}
+tr.kb-focus{outline:2px solid var(--accent);outline-offset:-2px}
 .empty-state{text-align:center;padding:50px 20px;color:var(--text3)}
 .empty-state .icon{font-size:2.5em;margin-bottom:10px;opacity:.35}
 .empty-state p{font-size:13px}
@@ -537,7 +549,10 @@ tr.selected td{background:var(--glow)}
 
     <div class="table-section">
       <div class="table-topbar">
-        <div class="table-topbar-title">🚨 Registro de Fallos</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="table-topbar-title">🚨 Registro de Fallos</div>
+          <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;display:none" id="selectAllBtn">☑ Seleccionar todos</button>
+        </div>
         <div class="multi-controls" id="multiControls">
           <span class="sel-info" id="selectedInfo">0 seleccionados</span>
           <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px" id="editSelectedBtn">✏️ Editar</button>
@@ -549,8 +564,9 @@ tr.selected td{background:var(--glow)}
           <thead>
             <tr>
               <th style="width:3%"></th><th style="width:4%">#</th>
-              <th style="width:28%">📍 Ubicación</th><th style="width:22%">🔧 Fallo</th>
-              <th style="width:10%">Tipo</th><th style="width:26%">📝 Análisis</th><th style="width:4%"></th>
+              <th style="width:26%">📍 Ubicación</th><th style="width:21%">🔧 Fallo</th>
+              <th style="width:10%">Tipo</th><th style="width:25%">📝 Análisis</th>
+              <th style="width:5%;text-align:center" title="Mover fila">↕</th><th style="width:4%"></th>
             </tr>
           </thead>
           <tbody id="fallosTableBody">
@@ -866,14 +882,25 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // ── TABLE ──
+  let kbFocusIndex = -1; // keyboard focused row index
+
   const updateTable = () => {
     const tbody = $('fallosTableBody'); tbody.innerHTML = '';
-    if (!fallosData.length) { tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="icon">📭</div><p>No hay fallos cargados.</p></div></td></tr>`; return; }
+    const selectAllBtn = $('selectAllBtn');
+    if (!fallosData.length) {
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="icon">📭</div><p>No hay fallos cargados.</p></div></td></tr>`;
+      if (selectAllBtn) selectAllBtn.style.display = 'none';
+      return;
+    }
+    if (selectAllBtn) selectAllBtn.style.display = '';
     fallosData.forEach((item, index) => {
       const row = tbody.insertRow(); row.dataset.index = index;
+      row.setAttribute('tabindex', '0');
       if (selectedRows.has(index)) row.classList.add('selected');
+      if (kbFocusIndex === index) row.classList.add('kb-focus');
       const opts = standardAnalyses.map(opt => `<option value="${opt}" ${item.analisis===opt?'selected':''}>${opt}</option>`).join('');
       const extra = (!standardAnalyses.includes(item.analisis) && item.analisis) ? `<option value="${item.analisis}" selected>${item.analisis}</option>` : '';
+      const isFirst = index === 0, isLast = index === fallosData.length - 1;
       row.innerHTML = `
         <td><input type="checkbox" class="select-checkbox" ${selectedRows.has(index)?'checked':''}></td>
         <td style="color:var(--text3);font-family:'IBM Plex Mono',monospace;font-size:11px">${index+1}</td>
@@ -883,10 +910,23 @@ document.addEventListener('DOMContentLoaded', () => {
         <td class="analisis-cell">
           <select class="analisis-select">${opts}${extra}<option value="custom">-- Nuevo... --</option></select>
           <button class="delete-btn" title="Eliminar">×</button>
-        </td><td></td>`;
+        </td>
+        <td>
+          <div class="move-cell">
+            <button class="move-btn move-up-btn" title="Mover arriba" ${isFirst?'disabled':''}><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg></button>
+            <button class="move-btn move-dn-btn" title="Mover abajo" ${isLast?'disabled':''}><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg></button>
+          </div>
+        </td>
+        <td></td>`;
       row.querySelector('.analisis-select').addEventListener('change', e => handleAnalysisChange(e.target, index));
       row.querySelector('.delete-btn').addEventListener('click', e => { e.stopPropagation(); deleteFallo(index); });
       row.querySelector('.select-checkbox').addEventListener('click', e => { e.stopPropagation(); toggleRow(index, e.target.checked); });
+      row.querySelector('.move-up-btn').addEventListener('click', e => { e.stopPropagation(); moveRow(index, -1); });
+      row.querySelector('.move-dn-btn').addEventListener('click', e => { e.stopPropagation(); moveRow(index, 1); });
+      // Keyboard: focus on row
+      row.addEventListener('focus', () => { kbFocusIndex = index; row.classList.add('kb-focus'); });
+      row.addEventListener('blur', () => { row.classList.remove('kb-focus'); });
+      row.addEventListener('keydown', e => handleRowKeydown(e, index));
     });
   };
 
@@ -912,6 +952,69 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedRows.clear();
     document.querySelectorAll('#fallosTableBody tr').forEach(r => { r.classList.remove('selected'); const cb = r.querySelector('.select-checkbox'); if (cb) cb.checked = false; });
     updateSelectionUI();
+  };
+
+  const moveRow = (idx, dir) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= fallosData.length) return;
+    // Swap in data array
+    [fallosData[idx], fallosData[newIdx]] = [fallosData[newIdx], fallosData[idx]];
+    // Update selectedRows indices
+    const hadIdx = selectedRows.has(idx), hadNew = selectedRows.has(newIdx);
+    if (hadIdx) selectedRows.add(newIdx); else selectedRows.delete(newIdx);
+    if (hadNew) selectedRows.add(idx); else selectedRows.delete(idx);
+    kbFocusIndex = newIdx;
+    updateUI();
+    // Restore focus to moved row
+    setTimeout(() => {
+      const movedRow = document.querySelector(`#fallosTableBody tr[data-index="${newIdx}"]`);
+      if (movedRow) movedRow.focus();
+    }, 0);
+  };
+
+  const selectAll = () => {
+    const allSelected = selectedRows.size === fallosData.length;
+    if (allSelected) {
+      clearSelection();
+    } else {
+      fallosData.forEach((_, i) => selectedRows.add(i));
+      document.querySelectorAll('#fallosTableBody tr[data-index]').forEach(r => {
+        r.classList.add('selected');
+        const cb = r.querySelector('.select-checkbox'); if (cb) cb.checked = true;
+      });
+      updateSelectionUI();
+    }
+  };
+
+  const handleRowKeydown = (e, index) => {
+    switch(e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        if (index < fallosData.length - 1) {
+          const next = document.querySelector(`#fallosTableBody tr[data-index="${index+1}"]`);
+          if (next) next.focus();
+        }
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        if (index > 0) {
+          const prev = document.querySelector(`#fallosTableBody tr[data-index="${index-1}"]`);
+          if (prev) prev.focus();
+        }
+        break;
+      case ' ':
+        e.preventDefault();
+        toggleRow(index, !selectedRows.has(index));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        toggleRow(index, !selectedRows.has(index));
+        break;
+      case 'Delete':
+      case 'Backspace':
+        if (e.target === e.currentTarget) { e.preventDefault(); deleteFallo(index); }
+        break;
+    }
   };
 
   // ── PROCESS ──
@@ -1103,6 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('saveUserBtn').addEventListener('click', saveUser);
   $('editSelectedBtn').addEventListener('click', () => { if (!selectedRows.size) { showNotification('Selecciona al menos una fila.', 'error'); return; } $('editModal').style.display='flex'; });
   $('clearSelectionBtn').addEventListener('click', clearSelection);
+  $('selectAllBtn').addEventListener('click', selectAll);
   $('cancelEditBtn').addEventListener('click', () => { $('editModal').style.display='none'; });
   $('saveEditBtn').addEventListener('click', applyAnalysis);
   [$('userFirstName'),$('userLastName')].forEach(el => el.addEventListener('keydown', e => { if(e.key==='Enter') saveUser(); }));
